@@ -43,36 +43,67 @@ exports.getRecords = (req, res) => {
 
 // ✅ Summary
 exports.getSummary = (req, res) => {
-  const incomeQuery =
-    "SELECT SUM(amount) AS totalIncome FROM records WHERE type='income'";
-  const expenseQuery =
-    "SELECT SUM(amount) AS totalExpense FROM records WHERE type='expense'";
+  const userId = req.user.id;
 
-  db.query(incomeQuery, (err, incomeResult) => {
+  // 1️⃣ Total Income & Expense
+  const totalQuery = `
+    SELECT 
+      SUM(CASE WHEN type='income' THEN amount ELSE 0 END) AS totalIncome,
+      SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) AS totalExpense
+    FROM records
+    WHERE user_id = ?
+  `;
+
+  // 2️⃣ Category-wise totals
+  const categoryQuery = `
+    SELECT category, SUM(amount) AS total
+    FROM records
+    WHERE user_id = ?
+    GROUP BY category
+  `;
+
+  // 3️⃣ Recent activity (last 5)
+  const recentQuery = `
+    SELECT * FROM records
+    WHERE user_id = ?
+    ORDER BY date DESC
+    LIMIT 5
+  `;
+
+  // 4️⃣ Monthly summary
+  const monthlyQuery = `
+    SELECT MONTH(date) AS month, SUM(amount) AS total
+    FROM records
+    WHERE user_id = ?
+    GROUP BY MONTH(date)
+  `;
+
+  // Execute queries
+  db.query(totalQuery, [userId], (err, totalResult) => {
     if (err) return res.status(500).json(err);
 
-    db.query(expenseQuery, (err, expenseResult) => {
+    db.query(categoryQuery, [userId], (err, categoryResult) => {
       if (err) return res.status(500).json(err);
 
-      const totalIncome = incomeResult[0].totalIncome || 0;
-      const totalExpense = expenseResult[0].totalExpense || 0;
+      db.query(recentQuery, [userId], (err, recentResult) => {
+        if (err) return res.status(500).json(err);
 
-      res.json({
-        totalIncome,
-        totalExpense,
-        netBalance: totalIncome - totalExpense,
+        db.query(monthlyQuery, [userId], (err, monthlyResult) => {
+          if (err) return res.status(500).json(err);
+
+          const totalIncome = totalResult[0].totalIncome || 0;
+          const totalExpense = totalResult[0].totalExpense || 0;
+
+          res.json({
+            totalIncome,
+            totalExpense,
+            netBalance: totalIncome - totalExpense, // ✅ added
+            categoryWise: categoryResult,           // ✅ added
+            recentActivity: recentResult,           // ✅ added
+            monthlySummary: monthlyResult           // ✅ added
+          });
+        });
       });
     });
   });
-};
-
-// ✅ Category Summary
-exports.categorySummary = (req, res) => {
-  const sql =
-    "SELECT category, SUM(amount) as total FROM records GROUP BY category";
-
-  db.query(sql, (err, results) => {
-    if (err) return res.status(500).json(err);
-    res.json(results);
-  });
-};
+};  
